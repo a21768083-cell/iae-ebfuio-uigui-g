@@ -1,0 +1,458 @@
+
+import streamlit as st
+import random
+import time
+import urllib.parse
+
+st.set_page_config(
+    page_title="Mini Battle Arena",
+    page_icon="⚔️",
+    layout="wide"
+)
+
+# =========================
+# 캐릭터 데이터
+# =========================
+
+CHARACTERS = {
+    "전사": {
+        "weapon": "전설의 대검",
+        "weapon_icon": "⚔️",
+        "attack_name": "강철 베기",
+        "skill_name": "회전 베기",
+        "skill_desc": "대검을 회전시켜 강력한 피해를 준다.",
+        "damage": 40,
+        "skill_damage": 100,
+        "max_hp": 350,
+        "defense": 12,
+        "cooldown": 3,
+        "color": "#db8545",
+        "art": "🛡️"
+    },
+    "마법사": {
+        "weapon": "아케인 스태프",
+        "weapon_icon": "🔮",
+        "attack_name": "마력탄",
+        "skill_name": "메테오 스트라이크",
+        "skill_desc": "거대한 운석을 소환해 적에게 강력한 피해를 준다.",
+        "damage": 35,
+        "skill_damage": 125,
+        "max_hp": 240,
+        "defense": 5,
+        "cooldown": 4,
+        "color": "#a477ed",
+        "art": "✨"
+    },
+    "궁수": {
+        "weapon": "엘븐 롱보우",
+        "weapon_icon": "🏹",
+        "attack_name": "정밀 사격",
+        "skill_name": "연속 화살",
+        "skill_desc": "빠르게 화살 5발을 발사한다.",
+        "damage": 32,
+        "skill_damage": 105,
+        "max_hp": 280,
+        "defense": 8,
+        "cooldown": 3,
+        "color": "#43bd91",
+        "art": "🌿"
+    }
+}
+
+ENEMIES = {
+    "슬라임": {
+        "hp": 220,
+        "damage": 18,
+        "emoji": "🟢"
+    },
+    "고블린 전사": {
+        "hp": 300,
+        "damage": 25,
+        "emoji": "👺"
+    },
+    "다크 나이트": {
+        "hp": 450,
+        "damage": 32,
+        "emoji": "💀"
+    }
+}
+
+# =========================
+# CSS
+# =========================
+
+st.markdown("""
+<style>
+.stApp {
+    background: linear-gradient(135deg,#0b1020,#19182d,#0b1020);
+    color: white;
+}
+
+h1,h2,h3 {
+    color: #f5d58c !important;
+}
+
+.panel {
+    background: linear-gradient(145deg,#24283d,#131827);
+    padding: 22px;
+    border-radius: 16px;
+    border: 1px solid #47445c;
+    text-align: center;
+}
+
+.battle-log {
+    background: #111827;
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px solid #343a50;
+    height: 250px;
+    overflow-y: auto;
+}
+
+.weapon {
+    background: #24263b;
+    padding: 15px;
+    border-radius: 12px;
+    border-left: 4px solid #e3b85e;
+}
+
+.stButton button {
+    border-radius: 10px;
+    min-height: 45px;
+    font-weight: bold;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# =========================
+# 게임 초기화
+# =========================
+
+def start_game(character, enemy):
+    c = CHARACTERS[character]
+    e = ENEMIES[enemy]
+
+    st.session_state.player_hp = c["max_hp"]
+    st.session_state.enemy_hp = e["hp"]
+    st.session_state.enemy_max_hp = e["hp"]
+    st.session_state.player_max_hp = c["max_hp"]
+
+    st.session_state.cooldown = 0
+    st.session_state.turn = 1
+    st.session_state.logs = ["⚔️ 전투가 시작되었습니다!"]
+    st.session_state.game_over = False
+    st.session_state.result = ""
+    st.session_state.current_character = character
+    st.session_state.current_enemy = enemy
+
+def add_log(message):
+    st.session_state.logs.insert(0, message)
+    st.session_state.logs = st.session_state.logs[:30]
+
+# =========================
+# 전투 처리
+# =========================
+
+def enemy_attack(character):
+    c = CHARACTERS[character]
+    enemy = ENEMIES[st.session_state.current_enemy]
+
+    raw_damage = random.randint(
+        max(5, enemy["damage"] - 5),
+        enemy["damage"] + 5
+    )
+
+    damage = max(1, raw_damage - c["defense"])
+
+    st.session_state.player_hp = max(
+        0,
+        st.session_state.player_hp - damage
+    )
+
+    add_log(f"👹 적이 반격했습니다! {damage} 피해!")
+
+    if st.session_state.player_hp <= 0:
+        st.session_state.game_over = True
+        st.session_state.result = "패배"
+
+def player_action(action, character):
+    if st.session_state.game_over:
+        return
+
+    c = CHARACTERS[character]
+
+    if action == "skill" and st.session_state.cooldown > 0:
+        return
+
+    if action == "attack":
+
+        damage = random.randint(
+            int(c["damage"] * 0.85),
+            int(c["damage"] * 1.15)
+        )
+
+        # 궁수는 정밀 사격 치명타 확률
+        if character == "궁수" and random.random() < 0.2:
+            damage *= 2
+            add_log("🎯 치명타! 정확한 화살 공격!")
+
+        st.session_state.enemy_hp = max(
+            0,
+            st.session_state.enemy_hp - damage
+        )
+
+        add_log(
+            f"{c['weapon_icon']} {c['attack_name']}! "
+            f"적에게 {damage} 피해!"
+        )
+
+    elif action == "skill":
+
+        damage = random.randint(
+            int(c["skill_damage"] * 0.9),
+            int(c["skill_damage"] * 1.1)
+        )
+
+        if character == "전사":
+            add_log("⚔️ 대검을 회전시키며 적을 베었습니다!")
+
+        elif character == "마법사":
+            add_log("☄️ 하늘에서 메테오가 떨어졌습니다!")
+
+        elif character == "궁수":
+            add_log("🏹 화살 5발을 연속 발사했습니다!")
+
+        st.session_state.enemy_hp = max(
+            0,
+            st.session_state.enemy_hp - damage
+        )
+
+        add_log(
+            f"✨ {c['skill_name']} 발동! "
+            f"{damage} 피해!"
+        )
+
+        st.session_state.cooldown = c["cooldown"]
+
+    # 적 처치 확인
+    if st.session_state.enemy_hp <= 0:
+        st.session_state.game_over = True
+        st.session_state.result = "승리"
+        add_log("🏆 승리! 적을 처치했습니다!")
+        return
+
+    # 적의 턴
+    enemy_attack(character)
+
+    # 스킬 쿨타임 감소
+    if action != "skill" and st.session_state.cooldown > 0:
+        st.session_state.cooldown -= 1
+
+    st.session_state.turn += 1
+
+# =========================
+# 타이틀
+# =========================
+
+st.markdown("""
+<div style="text-align:center;padding:15px">
+<h1 style="font-size:43px">⚔ MINI BATTLE ARENA ⚔</h1>
+<p style="letter-spacing:5px;color:#aaa">
+REAL TIME RPG BATTLE PROTOTYPE
+</p>
+</div>
+""", unsafe_allow_html=True)
+
+# =========================
+# 메뉴
+# =========================
+
+tab1, tab2 = st.tabs(["⚔️ 전투", "📖 캐릭터 정보"])
+
+with tab1:
+
+    st.subheader("🎮 전투 설정")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        character = st.selectbox(
+            "캐릭터 선택",
+            list(CHARACTERS.keys())
+        )
+
+    with col2:
+        enemy = st.selectbox(
+            "상대 선택",
+            list(ENEMIES.keys())
+        )
+
+    if st.button("🔄 새로운 전투 시작", use_container_width=True):
+        start_game(character, enemy)
+
+    # 전투 상태 확인
+    if (
+        "player_hp" not in st.session_state
+        or st.session_state.get("current_character") != character
+        or st.session_state.get("current_enemy") != enemy
+    ):
+        start_game(character, enemy)
+
+    c = CHARACTERS[character]
+    e = ENEMIES[enemy]
+
+    st.divider()
+
+    # =========================
+    # 전투 화면
+    # =========================
+
+    player_col, enemy_col = st.columns(2)
+
+    with player_col:
+        st.markdown(
+            f"""
+            <div class="panel">
+                <div style="font-size:65px">{c['art']}</div>
+                <h2>{character}</h2>
+                <p>{c['weapon_icon']} {c['weapon']}</p>
+                <p>PLAYER</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        st.markdown("### ❤️ 플레이어 체력")
+
+        st.progress(
+            max(0, st.session_state.player_hp)
+            / st.session_state.player_max_hp
+        )
+
+        st.write(
+            f"{st.session_state.player_hp} / "
+            f"{st.session_state.player_max_hp} HP"
+        )
+
+    with enemy_col:
+        st.markdown(
+            f"""
+            <div class="panel">
+                <div style="font-size:65px">{e['emoji']}</div>
+                <h2>{enemy}</h2>
+                <p>👹 ENEMY</p>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        st.markdown("### ❤️ 적 체력")
+
+        st.progress(
+            max(0, st.session_state.enemy_hp)
+            / st.session_state.enemy_max_hp
+        )
+
+        st.write(
+            f"{st.session_state.enemy_hp} / "
+            f"{st.session_state.enemy_max_hp} HP"
+        )
+
+    st.divider()
+
+    st.markdown("## 🗡️ 전투 액션")
+
+    attack_col, skill_col = st.columns(2)
+
+    with attack_col:
+        if st.button(
+            f"{c['weapon_icon']} {c['attack_name']}",
+            use_container_width=True,
+            disabled=st.session_state.game_over
+        ):
+            player_action("attack", character)
+            st.rerun()
+
+    with skill_col:
+        cooldown = st.session_state.cooldown
+
+        skill_label = (
+            f"✨ {c['skill_name']}"
+            if cooldown == 0
+            else f"⏳ 쿨타임 {cooldown}턴"
+        )
+
+        if st.button(
+            skill_label,
+            use_container_width=True,
+            disabled=(
+                st.session_state.game_over or cooldown > 0
+            )
+        ):
+            player_action("skill", character)
+            st.rerun()
+
+    st.caption(c["skill_desc"])
+
+    st.divider()
+
+    # =========================
+    # 전투 결과
+    # =========================
+
+    if st.session_state.game_over:
+
+        if st.session_state.result == "승리":
+            st.success("🏆 승리! 전투에서 이겼습니다!")
+            st.balloons()
+
+        else:
+            st.error("💀 패배! 다시 도전해 보세요.")
+
+        if st.button("🔄 다시 도전하기", use_container_width=True):
+            start_game(character, enemy)
+            st.rerun()
+
+    # =========================
+    # 전투 로그
+    # =========================
+
+    st.markdown("## 📜 전투 기록")
+
+    logs = st.session_state.logs
+
+    st.markdown(
+        '<div class="battle-log">',
+        unsafe_allow_html=True
+    )
+
+    for log in logs:
+        st.write(log)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.caption(f"전투 턴: {st.session_state.turn}")
+
+# =========================
+# 캐릭터 도감
+# =========================
+
+with tab2:
+
+    st.subheader("📖 영웅 도감")
+
+    for name, c in CHARACTERS.items():
+
+        with st.expander(f"{c['art']} {name} - {c['weapon']}"):
+
+            st.markdown(f"### {name}")
+
+            st.write(f"**무기:** {c['weapon']}")
+            st.write(f"**일반 공격:** {c['attack_name']}")
+            st.write(f"**전용 스킬:** {c['skill_name']}")
+            st.write(f"**스킬 설명:** {c['skill_desc']}")
+
+            st.write(f"공격력: {c['damage']}")
+            st.write(f"방어력: {c['defense']}")
+            st.write(f"최대 체력: {c['max_hp']}")
+            st.write(f"스킬 쿨타임: {c['cooldown']}턴")
